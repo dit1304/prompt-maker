@@ -40,9 +40,12 @@ async function uploadMultipart(file) {
     const partJson = await partRes.json();
     if (!partRes.ok || !partJson.ok) throw new Error(partJson.error || "upload/part gagal");
 
-    parts.push({ partNumber, etag: partJson.etag });
-    partNumber++;
-  }
+    parts.push({
+  partNumber,
+  etag: String(partJson.etag || "").replaceAll('"', "")
+});
+
+parts.sort((a, b) => a.partNumber - b.partNumber);
 
   // complete
   log("complete upload...");
