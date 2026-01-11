@@ -103,7 +103,8 @@ export default {
           return withCors(req, bad("Missing key/uploadId/partNumber"));
         }
         const mp = env.VIDEOS.resumeMultipartUpload(key, uploadId);
-        const etag = await mp.uploadPart(partNumber, req.body as ReadableStream);
+        const etagRaw = await mp.uploadPart(partNumber, req.body as ReadableStream);
+        const etag = String(etagRaw).replaceAll('"', "");
         return withCors(req, ok({ etag, partNumber }));
       }
 
@@ -123,8 +124,8 @@ export default {
         const normalized = parts
           .map((p: any) => ({
             partNumber: Number(p.partNumber),
-            etag: String(p.etag || "")
-          }))
+            etag: String(p.etag || "").replaceAll('"', ""),
+         }))
           .filter((p: any) => Number.isFinite(p.partNumber) && p.partNumber >= 1 && p.etag);
 
         if (normalized.length === 0) return withCors(req, bad("Invalid parts"));
