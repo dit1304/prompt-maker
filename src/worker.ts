@@ -129,6 +129,8 @@ export default {
           .filter((p: any) => Number.isFinite(p.partNumber) && p.partNumber >= 1 && p.etag);
 
         if (normalized.length === 0) return withCors(req, bad("Invalid parts"));
+        
+        normalized.sort((a, b) => a.partNumber - b.partNumber);
 
         const mp = env.VIDEOS.resumeMultipartUpload(key, uploadId);
         await mp.complete(normalized);
