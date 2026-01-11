@@ -9,7 +9,7 @@ export interface Env {
   OPENAI_API_KEY: string;
 }
 
-const PART_SIZE = 5 * MB; // multipart part size
+const PART_SIZE = 5 * MB;
 
 function withCors(req: Request, res: Response) {
   const origin = req.headers.get("origin");
@@ -24,7 +24,6 @@ function notFound() {
 }
 
 function parseMaybeJson(text: string): any | null {
-  // attempt to find first {...} json object
   const start = text.indexOf("{");
   const end = text.lastIndexOf("}");
   if (start >= 0 && end > start) {
@@ -47,9 +46,9 @@ async function callOpenAI(env: Env, payload: unknown) {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      authorization: `Bearer ${env.OPENAI_API_KEY}`
+      authorization: `Bearer ${env.OPENAI_API_KEY}`,
     },
-    body: JSON.stringify(payload)
+    body: JSON.stringify(payload),
   });
 
   const j = await res.json().catch(() => ({}));
@@ -57,26 +56,21 @@ async function callOpenAI(env: Env, payload: unknown) {
   return { ok: true, detail: j };
 }
 
-type UploadPartResp = { etag: string; partNumber: number };
-
-function cleanEtag(v: unknown): string {
-  // Keep as-is except remove wrapping quotes if present.
-  // Do NOT stringify objects.
-  const s = typeof v === "string" ? v : "";
-  return s.replaceAll('"', "").trim();
+// helper untuk bersihin etag
+function cleanEtag(etag: unknown) {
+  return String(etag || "").trim().replaceAll('"', "");
 }
 
 export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
 
-    // CORS preflight
     if (req.method === "OPTIONS") {
       return withCors(req, new Response(null, { status: 204 }));
     }
 
     try {
-      // ============= Upload multipart to R2 =============
+      // ===================== Upload multipart to R2 =====================
 
       // POST /api/upload/start
       if (req.method === "POST" && url.pathname === "/api/upload/start") {
@@ -94,7 +88,7 @@ export default {
 
         const key = makeVideoKey(filename);
         const mp = await env.VIDEOS.createMultipartUpload(key, {
-          httpMetadata: { contentType: "video/mp4" }
+          httpMetadata: { contentType: "video/mp4" },
         });
 
         return withCors(req, ok({ key, uploadId: mp.uploadId, partSize: PART_SIZE }));
@@ -114,17 +108,14 @@ export default {
         }
 
         const mp = env.VIDEOS.resumeMultipartUpload(key, uploadId);
+        const etagRaw = await mp.uploadPart(partNumber, req.body as ReadableStream);
+        const etag = cleanEtag(etagRaw);
 
-        // ✅ IMPORTANT: uploadPart returns an object, not a string
-        const uploaded = (await mp.uploadPart(partNumber, req.body as ReadableStream)) as any;
+        if (!etag) {
+          return withCors(req, bad("Failed to get ETag for uploaded part"));
+        }
 
-        const etag = cleanEtag(uploaded?.etag);
-        const pn = Number(uploaded?.partNumber ?? partNumber);
-
-        if (!etag) return withCors(req, json({ ok: false, error: "Missing etag from R2 uploadPart" }, { status: 502 }));
-
-        const resp: UploadPartResp = { etag, partNumber: pn };
-        return withCors(req, ok(resp));
+        return withCors(req, ok({ etag, partNumber }));
       }
 
       // POST /api/upload/complete
@@ -134,54 +125,50 @@ export default {
 
         const key = String(body?.key || "");
         const uploadId = String(body?.uploadId || "");
-        const parts = Array.isArray(body?.parts) ? body.parts : [];
+        const partsRaw = Array.isArray(body?.parts) ? body.parts : [];
 
-        if (!key || !uploadId || parts.length === 0) {
+        if (!key || !uploadId || partsRaw.length === 0) {
           return withCors(req, bad("Missing key/uploadId/parts"));
         }
 
-        // Normalize + validate parts
-        const normalized = parts
+        // normalize
+        let parts = partsRaw
           .map((p: any) => ({
             partNumber: Number(p?.partNumber),
-            etag: cleanEtag(p?.etag)
+            etag: cleanEtag(p?.etag),
           }))
-          .filter((p: any) => Number.isFinite(p.partNumber) && p.partNumber >= 1 && !!p.etag);
+          .filter((p: any) => Number.isFinite(p.partNumber) && p.partNumber >= 1 && p.etag);
 
-        if (normalized.length === 0) return withCors(req, bad("Invalid parts"));
+        if (parts.length === 0) return withCors(req, bad("Invalid parts"));
 
-        // Reject duplicates
-        const seen = new Set<number>();
-        for (const p of normalized) {
-          if (seen.has(p.partNumber)) return withCors(req, bad(`Duplicate partNumber: ${p.partNumber}`));
-          seen.add(p.partNumber);
+        // remove duplicates: keep last etag for each partNumber
+        const mpMap = new Map<number, string>();
+        for (const p of parts) mpMap.set(p.partNumber, p.etag);
+
+        parts = [...mpMap.entries()]
+          .map(([partNumber, etag]) => ({ partNumber, etag }))
+          .sort((a, b) => a.partNumber - b.partNumber);
+
+        // validate continuous parts 1..N (no gaps)
+        for (let i = 0; i < parts.length; i++) {
+          const expected = i + 1;
+          if (parts[i].partNumber !== expected) {
+            return withCors(
+              req,
+              bad(`Parts tidak valid / bolong. Harus 1..N berurutan. Ketemu partNumber=${parts[i].partNumber}, expected=${expected}`)
+            );
+          }
         }
 
-        // Sort for safety
-        normalized.sort((a, b) => a.partNumber - b.partNumber);
-
         const mp = env.VIDEOS.resumeMultipartUpload(key, uploadId);
-        await mp.complete(normalized);
+
+        // INI titik error 10025 biasanya terjadi jika parts salah
+        await mp.complete(parts);
 
         return withCors(req, ok({ key }));
       }
 
-      // (Optional) POST /api/upload/abort
-      if (req.method === "POST" && url.pathname === "/api/upload/abort") {
-        requireJson(req);
-        const body = await req.json().catch(() => ({} as any));
-
-        const key = String(body?.key || "");
-        const uploadId = String(body?.uploadId || "");
-
-        if (!key || !uploadId) return withCors(req, bad("Missing key/uploadId"));
-
-        const mp = env.VIDEOS.resumeMultipartUpload(key, uploadId);
-        await mp.abort();
-        return withCors(req, ok({ aborted: true }));
-      }
-
-      // ============= Make prompt =============
+      // ===================== Make prompt =====================
 
       // POST /api/make-prompt
       if (req.method === "POST" && url.pathname === "/api/make-prompt") {
@@ -199,10 +186,7 @@ export default {
         const video_size = body?.video_size ? Number(body.video_size) : null;
 
         if (!env.OPENAI_API_KEY) {
-          return withCors(
-            req,
-            json({ ok: false, error: "OPENAI_API_KEY belum di-set (wrangler secret put)." }, { status: 500 })
-          );
+          return withCors(req, json({ ok: false, error: "OPENAI_API_KEY belum di-set (wrangler secret put)." }, { status: 500 }));
         }
         if (frames.length === 0) return withCors(req, bad("frames kosong"));
         if (frames.length > 16) return withCors(req, bad("maks 16 frames"));
@@ -219,19 +203,19 @@ export default {
               "",
               templateGuide(template),
               "",
-              outputSchemaHint()
-            ].join("\n")
+              outputSchemaHint(),
+            ].join("\n"),
           },
           ...frames.map((dataUrl) => ({
             type: "input_image",
             image_url: dataUrl,
-            detail: "low"
-          }))
+            detail: "low",
+          })),
         ];
 
         const payload = {
           model: "gpt-5",
-          input: [{ role: "user", content: inputContent }]
+          input: [{ role: "user", content: inputContent }],
         };
 
         const ai = await callOpenAI(env, payload);
@@ -244,11 +228,12 @@ export default {
           (detail?.output_text as string) ||
           (Array.isArray(detail?.output)
             ? detail.output
-                .map((o: any) => (Array.isArray(o?.content) ? o.content.map((c: any) => c?.text || "").join("") : ""))
+                .map((o: any) =>
+                  Array.isArray(o?.content) ? o.content.map((c: any) => c?.text || "").join("") : ""
+                )
                 .join("\n")
             : "");
 
-        // Parse JSON result (best effort)
         const parsed = parseMaybeJson(outputText) || {};
         const summary = typeof parsed.summary === "string" ? parsed.summary : "";
         const prompt = typeof parsed.prompt === "string" ? parsed.prompt : outputText;
@@ -270,19 +255,19 @@ export default {
           negative_prompt,
           tags_json: JSON.stringify(tags),
           notes,
-          raw_json: JSON.stringify(detail)
+          raw_json: JSON.stringify(detail),
         });
 
         return withCors(
           req,
           ok({
             id,
-            result: { summary, prompt, negative_prompt, tags, notes }
+            result: { summary, prompt, negative_prompt, tags, notes },
           })
         );
       }
 
-      // ============= History API (D1) =============
+      // ===================== History API (D1) =====================
 
       // GET /api/history?limit=20&offset=0
       if (req.method === "GET" && url.pathname === "/api/history") {
@@ -298,8 +283,9 @@ export default {
             } catch {
               return [];
             }
-          })()
+          })(),
         }));
+
         return withCors(req, ok({ items: mapped, limit, offset }));
       }
 
@@ -317,6 +303,7 @@ export default {
         } catch {
           tags = [];
         }
+
         return withCors(req, ok({ item: { ...row, tags } }));
       }
 
@@ -327,6 +314,7 @@ export default {
 
         const changes = await deleteRun(env.DB, id);
         if (changes === 0) return withCors(req, bad("Not found", 404));
+
         return withCors(req, ok({ deleted: true }));
       }
 
@@ -334,5 +322,5 @@ export default {
     } catch (e: any) {
       return withCors(req, json({ ok: false, error: String(e?.message || e) }, { status: 500 }));
     }
-  }
+  },
 };
