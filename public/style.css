@@ -1,1 +1,94 @@
+:root { --bg:#0b0c10; --card:#12141b; --text:#e9edf1; --muted:#a9b1bb; --line:#232838; }
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial;
+  background: var(--bg);
+  color: var(--text);
+}
+.header {
+  padding: 18px 16px;
+  border-bottom: 1px solid var(--line);
+  max-width: 1200px;
+  margin: 0 auto;
+}
+.header p { color: var(--muted); margin: 6px 0 0; }
 
+.grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  padding: 14px 16px 26px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+@media (max-width: 980px) {
+  .grid { grid-template-columns: 1fr; }
+}
+.card {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px;
+  box-shadow: 0 6px 22px rgba(0,0,0,.25);
+}
+h1,h2,h3 { margin: 8px 0 10px; }
+h3 { color: var(--muted); font-weight: 600; }
+
+.row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin: 10px 0; }
+
+.field { display: grid; gap: 6px; margin: 10px 0; width: 100%; }
+.field > span { color: var(--muted); font-size: 13px; }
+input, select, textarea, button {
+  background: #0f1118;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 14px;
+}
+textarea { min-height: 220px; resize: vertical; }
+button { cursor: pointer; }
+button:hover { border-color: #3a4462; }
+
+.hint {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  border: 1px dashed var(--line);
+  color: var(--muted);
+}
+
+.thumbs {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 8px;
+}
+.thumbs img {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+}
+
+.log {
+  background: #0f1118;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  min-height: 90px;
+  white-space: pre-wrap;
+  color: #cdd6df;
+}
+
+.history {
+  display: grid;
+  gap: 10px;
+}
+.hitem {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  padding: 10px;
+  background: #0f1118;
+}
+.hitem .meta { color: var(--muted); font-size: 12px; margin-bottom: 6px; }
+.hitem .actions { display:flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
