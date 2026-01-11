@@ -1,1 +1,86 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Prompt Maker (Video → Prompt)</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <header class="header">
+    <h1>Prompt Maker</h1>
+    <p>Upload MP4 (≥ 10MB) → ambil beberapa frame → generate prompt + simpan history.</p>
+  </header>
 
+  <main class="grid">
+    <section class="card">
+      <h2>1) Upload Video</h2>
+
+      <div class="row">
+        <input id="file" type="file" accept="video/mp4" />
+        <button id="run">Upload + Buat Prompt</button>
+      </div>
+
+      <div class="row">
+        <label class="field">
+          <span>Template</span>
+          <select id="template">
+            <option value="general">General</option>
+            <option value="sdxl">SDXL</option>
+            <option value="midjourney">Midjourney</option>
+            <option value="video">Video</option>
+          </select>
+        </label>
+
+        <label class="field">
+          <span>Bahasa</span>
+          <select id="language">
+            <option value="id">Indonesia</option>
+            <option value="en">English</option>
+          </select>
+        </label>
+      </div>
+
+      <label class="field">
+        <span>Tujuan</span>
+        <input id="goal" placeholder="Mis: Buat prompt sinematik untuk iklan produk" />
+      </label>
+
+      <label class="field">
+        <span>Style</span>
+        <input id="style" placeholder="Mis: cinematic, detailed, clean composition" />
+      </label>
+
+      <div class="hint">
+        <b>Catatan:</b> Frame diambil di browser agar Worker tetap ringan.
+      </div>
+
+      <h3>Frames terpilih</h3>
+      <div id="thumbs" class="thumbs"></div>
+    </section>
+
+    <section class="card">
+      <h2>2) Output</h2>
+
+      <div class="row">
+        <button id="copyPrompt">Copy Prompt</button>
+        <button id="copyAll">Copy Semua JSON</button>
+        <button id="loadHistory">Refresh History</button>
+      </div>
+
+      <label class="field">
+        <span>JSON Output</span>
+        <textarea id="out" placeholder="Hasil JSON akan muncul di sini..."></textarea>
+      </label>
+
+      <h2>3) History</h2>
+      <div id="history" class="history"></div>
+
+      <h2>Log</h2>
+      <pre id="log" class="log"></pre>
+    </section>
+  </main>
+
+  <script src="./app.js"></script>
+</body>
+</html>
