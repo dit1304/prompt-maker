@@ -1,0 +1,12 @@
+name = "prompt-maker"
+main = "src/worker.ts"
+compatibility_date = "2026-01-11"
+
+[[r2_buckets]]
+binding = "VIDEOS"
+bucket_name = "prompt-maker-videos"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "prompt-maker-db"
+database_id = "PASTE_D1_ID_HERE"
