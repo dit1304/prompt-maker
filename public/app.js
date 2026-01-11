@@ -1,5 +1,5 @@
 // Kalau UI + Worker 1 domain (routes /api/*), biarkan kosong.
-const API_BASE = "";
+const API_BASE = "https://api.zeroprompt.biz.id";
 
 // Helpers
 const $ = (id) => document.getElementById(id);
