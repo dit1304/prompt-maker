@@ -9,4 +9,4 @@ bucket_name = "prompt-maker-videos"
 [[d1_databases]]
 binding = "DB"
 database_name = "prompt-maker-db"
-database_id = "93b37160-2674-4a37-bc91-f9a95f7e681f"
+database_id = "9169084d-7905-4dba-8217-b3279011dbf9"
