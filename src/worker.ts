@@ -53,10 +53,17 @@ async function callOpenAI(env: Env, payload: unknown) {
   });
 
   const j = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    return { ok: false, status: res.status, detail: j };
-  }
+  if (!res.ok) return { ok: false, status: res.status, detail: j };
   return { ok: true, detail: j };
+}
+
+type UploadPartResp = { etag: string; partNumber: number };
+
+function cleanEtag(v: unknown): string {
+  // Keep as-is except remove wrapping quotes if present.
+  // Do NOT stringify objects.
+  const s = typeof v === "string" ? v : "";
+  return s.replaceAll('"', "").trim();
 }
 
 export default {
@@ -102,10 +109,22 @@ export default {
         if (!key || !uploadId || partNumber < 1) {
           return withCors(req, bad("Missing key/uploadId/partNumber"));
         }
+        if (!req.body) {
+          return withCors(req, bad("Missing request body"));
+        }
+
         const mp = env.VIDEOS.resumeMultipartUpload(key, uploadId);
-        const etagRaw = await mp.uploadPart(partNumber, req.body as ReadableStream);
-        const etag = String(etagRaw).replaceAll('"', "");
-        return withCors(req, ok({ etag, partNumber }));
+
+        // ✅ IMPORTANT: uploadPart returns an object, not a string
+        const uploaded = (await mp.uploadPart(partNumber, req.body as ReadableStream)) as any;
+
+        const etag = cleanEtag(uploaded?.etag);
+        const pn = Number(uploaded?.partNumber ?? partNumber);
+
+        if (!etag) return withCors(req, json({ ok: false, error: "Missing etag from R2 uploadPart" }, { status: 502 }));
+
+        const resp: UploadPartResp = { etag, partNumber: pn };
+        return withCors(req, ok(resp));
       }
 
       // POST /api/upload/complete
@@ -121,21 +140,45 @@ export default {
           return withCors(req, bad("Missing key/uploadId/parts"));
         }
 
+        // Normalize + validate parts
         const normalized = parts
           .map((p: any) => ({
-            partNumber: Number(p.partNumber),
-            etag: String(p.etag || "").replaceAll('"', ""),
-         }))
-          .filter((p: any) => Number.isFinite(p.partNumber) && p.partNumber >= 1 && p.etag);
+            partNumber: Number(p?.partNumber),
+            etag: cleanEtag(p?.etag)
+          }))
+          .filter((p: any) => Number.isFinite(p.partNumber) && p.partNumber >= 1 && !!p.etag);
 
         if (normalized.length === 0) return withCors(req, bad("Invalid parts"));
-        
+
+        // Reject duplicates
+        const seen = new Set<number>();
+        for (const p of normalized) {
+          if (seen.has(p.partNumber)) return withCors(req, bad(`Duplicate partNumber: ${p.partNumber}`));
+          seen.add(p.partNumber);
+        }
+
+        // Sort for safety
         normalized.sort((a, b) => a.partNumber - b.partNumber);
 
         const mp = env.VIDEOS.resumeMultipartUpload(key, uploadId);
         await mp.complete(normalized);
 
         return withCors(req, ok({ key }));
+      }
+
+      // (Optional) POST /api/upload/abort
+      if (req.method === "POST" && url.pathname === "/api/upload/abort") {
+        requireJson(req);
+        const body = await req.json().catch(() => ({} as any));
+
+        const key = String(body?.key || "");
+        const uploadId = String(body?.uploadId || "");
+
+        if (!key || !uploadId) return withCors(req, bad("Missing key/uploadId"));
+
+        const mp = env.VIDEOS.resumeMultipartUpload(key, uploadId);
+        await mp.abort();
+        return withCors(req, ok({ aborted: true }));
       }
 
       // ============= Make prompt =============
@@ -156,7 +199,10 @@ export default {
         const video_size = body?.video_size ? Number(body.video_size) : null;
 
         if (!env.OPENAI_API_KEY) {
-          return withCors(req, json({ ok: false, error: "OPENAI_API_KEY belum di-set (wrangler secret put)." }, { status: 500 }));
+          return withCors(
+            req,
+            json({ ok: false, error: "OPENAI_API_KEY belum di-set (wrangler secret put)." }, { status: 500 })
+          );
         }
         if (frames.length === 0) return withCors(req, bad("frames kosong"));
         if (frames.length > 16) return withCors(req, bad("maks 16 frames"));
@@ -231,13 +277,7 @@ export default {
           req,
           ok({
             id,
-            result: {
-              summary,
-              prompt,
-              negative_prompt,
-              tags,
-              notes
-            }
+            result: { summary, prompt, negative_prompt, tags, notes }
           })
         );
       }
@@ -250,7 +290,6 @@ export default {
         const offset = clamp(toInt(url.searchParams.get("offset"), 0), 0, 10_000);
 
         const rows = await listRuns(env.DB, limit, offset);
-        // parse tags_json
         const mapped = rows.map((r: any) => ({
           ...r,
           tags: (() => {
